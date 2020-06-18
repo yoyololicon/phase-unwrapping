@@ -119,7 +119,8 @@ def minimum_cost_PU_sparse(x, y, psi, capacity=None):
     G.add_node(-1, demand=-demands.sum())
     print(demands.sum())
 
-    weights = np.sum(demands[simplex_edges] == 0, 1)
+    demands_dummy = np.pad(demands, (0, 1), 'constant', constant_values=0)
+    weights = np.sum(demands_dummy[simplex_edges] == 0, 1)
     G.add_weighted_edges_from(zip(simplex_edges[:, 0], simplex_edges[:, 1], weights), **cap_args)
 
     G = G.to_directed()
