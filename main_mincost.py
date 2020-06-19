@@ -6,12 +6,12 @@ from skimage import data, img_as_float, color, exposure
 from skimage.restoration import unwrap_phase
 from utils import wrap_func
 from minimum_cost import minimum_cost_PU_grid, minimum_cost_PU_sparse
-from graph_cuts import puma
+from graph_cuts import puma, puma_new
 
-shape = (200,) * 2
-height = 20 * np.pi
+shape = (128,) * 2
+height = 22 * np.pi
 mean = np.array(shape) * 0.5
-cov = np.array([20 ** 2, 25 ** 2, ])
+cov = np.array([15 ** 2, 25 ** 2, ])
 rv = multivariate_normal(mean, cov)
 
 x, y = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]))
@@ -60,7 +60,7 @@ plt.subplot(312)
 #plt.scatter(sp_x, -sp_y, c=sp_psi, cmap='gray', s=0.05)
 #plt.xlim(0, sp_x.max() - 1)
 #plt.ylim(-sp_y.max() + 1, 0)
-result = puma(psi, max_jump=3, p=1)
+result = puma(psi, max_jump=1, p=1)
 plt.imshow(result, cmap='gray')
 plt.subplot(313)
 plt.imshow(result - image, cmap='gray')

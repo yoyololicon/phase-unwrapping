@@ -1,6 +1,7 @@
 import numpy as np
 import networkx as nx
 from scipy.sparse import csr_matrix, csgraph
+import maxflow
 
 def wrap_func(x):
     return (x + np.pi) % (2 * np.pi) - np.pi
@@ -25,3 +26,4 @@ def scipy_maxflow(G: nx.DiGraph, s, t, capacity='capacity', **kwargs):
         R[i][j]['flow'] = residual[i, j]
 
     return R
+
