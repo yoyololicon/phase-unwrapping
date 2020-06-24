@@ -60,7 +60,7 @@ def mcf(x: np.ndarray, capacity=None):
     K1 = np.empty((N - 1, M))
 
     # add the flow to their orthogonal edge
-    # the sign of the flow depends on the 4 vector direction (clockwise or counter-clockwise)
+    # the sign of the flow depends on those 4 vectors direction (clockwise or counter-clockwise)
     # when calculating the demands
     for i in range(N - 1):
         for j in range(M):
@@ -77,7 +77,7 @@ def mcf(x: np.ndarray, capacity=None):
                 K2[i][j] = flowdict[(i - 1) * M + j][i * M + j] - flowdict[i * M + j][(i - 1) * M + j]
 
     # the boundary node with index = 0 have only one edge to earth node,
-    # so set one of it's edge's K to zero
+    # so set one of its edge's K to zero
     K2[0, 0] = 0
 
     # derive correct gradients
