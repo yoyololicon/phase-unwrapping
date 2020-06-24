@@ -115,7 +115,7 @@ def puma(x: np.ndarray, max_jump=1, p=1):
             e01 = V(a - 2 * np.pi * step)
             e10 = V(a + 2 * np.pi * step)
             weight = np.maximum(0, e10 + e01 - e00 - e11)
-            weight = (1e+3 * weight).astype(int)
+            weight = (1e+2 * weight).astype(int)
 
             G.add_weighted_edges_from(zip(i, j, weight),
                                       weight='capacity')
@@ -129,7 +129,7 @@ def puma(x: np.ndarray, max_jump=1, p=1):
                 tmp_st_weight[1, u] += -min(0, e10[i] - e00[i])
                 tmp_st_weight[1, v] += -min(0, e11[i] - e10[i])
 
-            tmp_st_weight = (1e+3 * tmp_st_weight).astype(int).ravel()
+            tmp_st_weight = (1e+2 * tmp_st_weight).astype(int).ravel()
             st_edges = np.array(list(zip([s] * total_nodes + list(range(total_nodes)),
                                          list(range(total_nodes)) + [t] * total_nodes)))
 
