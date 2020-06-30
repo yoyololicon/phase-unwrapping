@@ -86,7 +86,7 @@ def mcf(x: np.ndarray, capacity=None):
 
     # integrate the gradients
     y = np.full_like(x, x[0, 0])
-    y[1:, 0] = np.cumsum(psi1[:, 0])
+    y[1:, 0] += np.cumsum(psi1[:, 0])
     y[:, 1:] = np.cumsum(psi2, axis=1) + y[:, :1]
     return y
 
@@ -116,29 +116,20 @@ def mcf_sparse(x, y, psi, capacity=None):
         np.roll(simplex_neighbors, -1, 1)), axis=2
     ).reshape(-1, 2)
 
-    # remove duplicated vertex edges
-    edges, unique_idx = np.unique(edges, axis=0, return_index=True)
-    simplex_edges = simplex_edges[unique_idx]
-
     # get demands
     demands = np.round(-psi_diff.sum(1) * 0.5 / np.pi).astype(np.int)
-    psi_diff = psi_diff.flatten()[unique_idx]
+    psi_diff = psi_diff.flatten()
 
     G = nx.Graph()
     G.add_nodes_from(zip(range(num_simplex),
                          [{'demand': d} for d in demands]))
-
-    # choose an integration path, here let's use BFS
-    traverse_G = nx.Graph()
-    traverse_G.add_edges_from(edges)
-    traverse_path = list(nx.algorithms.traversal.breadth_first_search.bfs_edges(traverse_G, 0))
 
     # set earth node index to -1, and its demand is the negative of the sum of all demands,
     # so the total demands is zero
     G.add_node(-1, demand=-demands.sum())
 
     # set the edge weight to 1 whenever one of its nodes has zero demand
-    demands_dummy = np.pad(demands, (0, 1), 'constant', constant_values=0)
+    demands_dummy = np.concatenate((demands, [-demands.sum()]))
     weights = np.any(demands_dummy[simplex_edges] == 0, 1)
     G.add_weighted_edges_from(zip(simplex_edges[:, 0], simplex_edges[:, 1], weights), **cap_args)
 
@@ -162,10 +153,12 @@ def mcf_sparse(x, y, psi, capacity=None):
     psi_dict = {i: {} for i in range(num_points)}
     for diff, (u, v) in zip(psi_diff, edges):
         psi_dict[u][v] = diff
-        psi_dict[v][u] = -diff
 
     # integrate the gradients
     result = psi.copy()
-    for u, v in traverse_path:
+
+    # choose an integration path, here let's use BFS
+    traverse_G = nx.DiGraph(edges.tolist())
+    for u, v in nx.algorithms.traversal.breadth_first_search.bfs_edges(traverse_G, 0):
         result[v] = result[u] + psi_dict[u][v]
     return result
