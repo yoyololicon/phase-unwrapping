@@ -2,9 +2,10 @@ import numpy as np
 import networkx as nx
 from scipy.spatial import Delaunay
 from utils import wrap_func as W
+from ortools.graph.pywrapgraph import SimpleMinCostFlow
 
 
-def mcf(x: np.ndarray, capacity=None):
+def mcf_nx(x: np.ndarray, capacity=None):
     assert x.ndim == 2, "Input x should be a 2d array!"
 
     # construct index for each node
@@ -45,7 +46,7 @@ def mcf(x: np.ndarray, capacity=None):
 
     # add the remaining edges that connected to earth node
     G.add_edges_from(zip([-1] * M, range(M)), **cap_args)
-    G.add_edges_from(zip([-1] * M, range((N - 1) * M, N * M - 1)), **cap_args)
+    G.add_edges_from(zip([-1] * M, range((N - 1) * M, N * M)), **cap_args)
     G.add_edges_from(zip([-1] * N, range(0, N * M, M)), **cap_args)
     G.add_edges_from(zip([-1] * N, range(M - 1, N * M, M)), **cap_args)
 
@@ -91,7 +92,87 @@ def mcf(x: np.ndarray, capacity=None):
     return y
 
 
-def mcf_sparse(x, y, psi, capacity=None):
+def mcf_or(x: np.ndarray, capacity=None):
+    assert x.ndim == 2, "Input x should be a 2d array!"
+
+    # construct index for each node
+    N, M = x.shape
+    index = np.arange(N * M).reshape(N, M)
+
+    # get pseudo estimation of gradients along x and y axis
+    psi1 = W(np.diff(x, axis=0))
+    psi2 = W(np.diff(x, axis=1))
+
+    min_cost_flow = SimpleMinCostFlow()
+
+    supplys = np.round((psi1[:, 1:] - psi1[:, :-1] - psi2[1:, :] + psi2[:-1, :]) * 0.5 / np.pi).astype(np.int)
+    supplys = np.pad(supplys, ((0, 1),) * 2, 'constant', constant_values=0).astype(int)
+
+    # edges along x and y axis
+    edges = np.vstack((
+        np.vstack((index[:, :-1].ravel(), index[:, 1:].ravel())).T,
+        np.vstack((index[:-1].ravel(), index[1:].ravel())).T)
+    )
+
+    weights = np.concatenate(((supplys[:, :-1] == 0).ravel(), (supplys[:-1] == 0).ravel())).astype(int) * 100
+    weights += 1
+
+    if capacity is None:
+        capacity = int(np.abs(supplys).sum())
+
+    for u, v, w in zip(edges[:, 0].tolist(), edges[:, 1].tolist(), weights.tolist()):
+        min_cost_flow.AddArcWithCapacityAndUnitCost(u, v, capacity, w)
+        min_cost_flow.AddArcWithCapacityAndUnitCost(v, u, capacity, w)
+
+    earth_node = N * M
+
+    for i in list(range(M)) + \
+             list(range((N - 1) * M, N * M)) + \
+             list(range(M, (N - 1) * M, M)) + \
+             list(range(2 * M - 1, (N - 1) * M, M)):
+        min_cost_flow.AddArcWithCapacityAndUnitCost(earth_node, i, capacity, 1)
+        min_cost_flow.AddArcWithCapacityAndUnitCost(i, earth_node, capacity, 1)
+
+    for i, s in enumerate(supplys.ravel().tolist()):
+        min_cost_flow.SetNodeSupply(i, s)
+    min_cost_flow.SetNodeSupply(earth_node, -int(supplys.sum()))
+
+    min_cost_flow.Solve()
+
+    K2 = np.empty((N, M - 1))
+    K1 = np.empty((N - 1, M))
+
+    flowdict = {i: {} for i in range(N * M + 1)}
+    for i in range(min_cost_flow.NumArcs()):
+        flowdict[min_cost_flow.Tail(i)][min_cost_flow.Head(i)] = min_cost_flow.Flow(i)
+
+    for i in range(N - 1):
+        for j in range(M):
+            if j == 0:
+                K1[i][0] = -flowdict[earth_node][i * M] + flowdict[i * M][earth_node]
+            else:
+                K1[i][j] = -flowdict[i * M + j - 1][i * M + j] + flowdict[i * M + j][i * M + j - 1]
+
+    for i in range(N):
+        for j in range(M - 1):
+            if i == 0:
+                K2[i][j] = flowdict[earth_node][j] - flowdict[j][earth_node]
+            else:
+                K2[i][j] = flowdict[(i - 1) * M + j][i * M + j] - flowdict[i * M + j][(i - 1) * M + j]
+
+    K2[0, 0] = 0
+
+    psi1 += K1 * 2 * np.pi
+    psi2 += K2 * 2 * np.pi
+
+    y = np.full_like(x, x[0, 0])
+    y[1:, 0] += np.cumsum(psi1[:, 0])
+    y[:, 1:] = np.cumsum(psi2, axis=1) + y[:, :1]
+
+    return y
+
+
+def mcf_sparse_nx(x, y, psi, capacity=None):
     points = np.vstack((x, y)).T
     num_points = points.shape[0]
 
@@ -158,6 +239,74 @@ def mcf_sparse(x, y, psi, capacity=None):
     result = psi.copy()
 
     # choose an integration path, here let's use BFS
+    traverse_G = nx.DiGraph(edges.tolist())
+    for u, v in nx.algorithms.traversal.breadth_first_search.bfs_edges(traverse_G, 0):
+        result[v] = result[u] + psi_dict[u][v]
+    return result
+
+
+def mcf_sparse_or(x, y, psi, capacity=None):
+    points = np.vstack((x, y)).T
+    num_points = points.shape[0]
+
+    # Delaunay triangularization
+    tri = Delaunay(points)
+    simplex = tri.simplices
+    simplex_neighbors = tri.neighbors
+    num_simplex = simplex.shape[0]
+
+    # get pseudo estimation of gradients and vertex edges
+    psi_diff = W(psi[simplex] - psi[np.roll(simplex, 1, 1)])
+    edges = np.stack((np.roll(simplex, 1, 1), simplex), axis=2).reshape(-1, 2)
+
+    # get corresponding simplex's edges orthogonal to original vertex edges
+    simplex_edges = np.stack((
+        np.broadcast_to(np.arange(num_simplex)[:, None], simplex_neighbors.shape),
+        np.roll(simplex_neighbors, -1, 1)), axis=2
+    ).reshape(-1, 2) % (num_simplex + 1)
+
+    # get demands
+    supplys = np.round(psi_diff.sum(1) * 0.5 / np.pi).astype(np.int)
+    psi_diff = psi_diff.flatten()
+
+    earth_node = num_simplex
+
+    # set the edge weight to 1 whenever one of its nodes has zero demand
+    supplys_dummy = np.concatenate((supplys, [-supplys.sum()]))
+    weights = np.any(supplys_dummy[simplex_edges] == 0, 1).astype(int) * 100
+    weights += 1
+
+    if capacity is None:
+        capacity = int(np.abs(supplys).sum())
+
+    min_cost_flow = SimpleMinCostFlow()
+
+    for u, v, w in zip(simplex_edges[:, 0].tolist(), simplex_edges[:, 1].tolist(), weights.tolist()):
+        min_cost_flow.AddArcWithCapacityAndUnitCost(u, v, capacity, w)
+        min_cost_flow.AddArcWithCapacityAndUnitCost(v, u, capacity, w)
+
+    for i, s in enumerate(supplys_dummy.ravel().tolist()):
+        min_cost_flow.SetNodeSupply(i, s)
+
+    min_cost_flow.Solve()
+
+    flowdict = {i: {} for i in range(num_simplex + 1)}
+    for i in range(min_cost_flow.NumArcs()):
+        flowdict[min_cost_flow.Tail(i)][min_cost_flow.Head(i)] = min_cost_flow.Flow(i)
+
+    K = np.empty(edges.shape[0])
+
+    for i, (u, v) in enumerate(simplex_edges):
+        K[i] = -flowdict[u][v] + flowdict[v][u]
+
+    psi_diff += K * 2 * np.pi
+
+    psi_dict = {i: {} for i in range(num_points)}
+    for diff, (u, v) in zip(psi_diff, edges):
+        psi_dict[u][v] = diff
+
+    result = psi.copy()
+
     traverse_G = nx.DiGraph(edges.tolist())
     for u, v in nx.algorithms.traversal.breadth_first_search.bfs_edges(traverse_G, 0):
         result[v] = result[u] + psi_dict[u][v]
